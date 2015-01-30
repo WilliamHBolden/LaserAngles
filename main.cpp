@@ -32,6 +32,9 @@ struct Camera
 	cv::Mat distCoeffs;
 
 	cv::Mat transMat;
+
+	float screenWidth;
+	float screenHeight;
 };
 
 
@@ -368,6 +371,9 @@ std::vector<int> chooseCameras()
 		}
 
 		cv::namedWindow("Camera "+std::to_string(numCameras), CV_WINDOW_AUTOSIZE);
+
+	Camera.set(CV_CAP_PROP_FRAME_WIDTH, 1280);
+	Camera.set(CV_CAP_PROP_FRAME_HEIGHT, 720);
 		availableCameras.push_back(Camera);
 
 		numCameras++;
@@ -535,7 +541,19 @@ std::vector<cv::Point2f> findLasers(cv::Mat& image)
 	return lasers;
 }
 
+cv::Point2f getPositionCM(cv::Point2f& point, Camera& cam, cv::Mat& image)
+{
+	float cmPerPixelX = cam.screenWidth/image.cols;
+	float cmPerPixelY = cam.screenHeight/image.rows;
 
+	float xPixelPos = point.x - image.cols/2.0f;
+	float yPixelPos = -(point.y - image.rows/2.0f);
+
+	float cmX = xPixelPos * cmPerPixelX;
+	float cmY = yPixelPos * cmPerPixelY;
+
+	return cv::Point2f(cmX, cmY);
+}
 
 int main()
 {
@@ -546,6 +564,9 @@ int main()
 	cv::namedWindow ("Primary", CV_WINDOW_AUTOSIZE);
 	cv::namedWindow ("Secondary", CV_WINDOW_AUTOSIZE);
 
+	Camera primary;
+	Camera secondary;
+
 
 	printf("%d, %d\n", cameraIds[0], cameraIds[1] );
 
@@ -555,28 +576,26 @@ int main()
 	file >> frameWidth;
 	file >> frameHeight;
 
-	file >> primaryScreenWidth;
-	file >> primaryScreenHeight;
+	file >> primary.screenWidth;
+	file >> primary.screenHeight;
 
-	file >> secondaryScreenWidth;
-	file >> secondaryScreenHeight;
+	file >> secondary.screenWidth;
+	file >> secondary.screenHeight;
 
 	file >> searchIterations;
 
 	file.close();
 
-	printf("Primary screen dimensons: %fcm, %fcm\n", primaryScreenWidth, primaryScreenHeight);
-	printf("Secondary screen dimensons: %fcm, %fcm\n", secondaryScreenWidth, secondaryScreenHeight);
+	printf("Primary screen dimensons: %fcm, %fcm\n", primary.screenWidth, primary.screenHeight);
+	printf("Secondary screen dimensons: %fcm, %fcm\n", secondary.screenWidth, secondary.screenHeight);
 
-	Camera primary;
 	primary.cam = cv::VideoCapture(cameraIds[0]);
-	//primary.cam.set(CV_CAP_PROP_FRAME_WIDTH, frameWidth);
-	//primary.cam.set(CV_CAP_PROP_FRAME_HEIGHT, frameHeight);
+	primary.cam.set(CV_CAP_PROP_FRAME_WIDTH, frameWidth);
+	primary.cam.set(CV_CAP_PROP_FRAME_HEIGHT, frameHeight);
 
-	Camera secondary;
 	secondary.cam = cv::VideoCapture(cameraIds[1]);
-	//secondary.cam.set(CV_CAP_PROP_FRAME_WIDTH, frameWidth);
-	//secondary.cam.set(CV_CAP_PROP_FRAME_HEIGHT, frameHeight);
+	secondary.cam.set(CV_CAP_PROP_FRAME_WIDTH, frameWidth);
+	secondary.cam.set(CV_CAP_PROP_FRAME_HEIGHT, frameHeight);
 
 
 	loadCalibration(primary.cameraMatrix, primary.distCoeffs, cameraIds[0]);
