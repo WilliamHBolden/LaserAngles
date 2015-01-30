@@ -6,89 +6,129 @@
 #include <iostream>
 #include <fstream>
 
-unsigned int frameWidth = 1280;
-unsigned int frameHeight = 720;
+int searchIterations = 10;
 
-float paperWidth = 23.9; //cm
-float paperHeight = 18.1; //cm
+unsigned int frameWidth = 1280/2;
+unsigned int frameHeight = 720/2;
 
-float numBoxW = 22;
-float numBoxH = 18;
+//float paperWidth = 23.9; //cm
+//float paperHeight = 18.1; //cm
 
-float dist = 20; //cm
+//float numBoxW = 22;
+//float numBoxH = 18;
 
+//float dist = 20; //cm
+
+float primaryScreenWidth;
+float primaryScreenHeight;
+
+float secondaryScreenWidth;
+float secondaryScreenHeight;
+
+struct Camera
+{
+	cv::VideoCapture cam;
+	cv::Mat cameraMatrix;
+	cv::Mat distCoeffs;
+
+	cv::Mat transMat;
+};
+
+
+float getAngle(float distanceToScreen, float distanceFromOrigin);
+void drawPoints(cv::Mat* image, const std::vector<cv::Point2f>& points);
+
+
+
+void loadCalibration(cv::Mat& cameraMatrix, cv::Mat& distCoeffs, const char* filepath);
+void loadCalibration(cv::Mat& cameraMatrix, cv::Mat& distCoeffs, int cameraSelection);
+
+std::vector<cv::Point> getQuad( cv::Mat& image);
+std::vector<cv::Point2f> findCorners(Camera& camera, int iterations);
+
+std::vector<cv::Point2f> orientCorners(std::vector<cv::Point2f> inCorners);
+std::vector<cv::Point2f> orientCorners(std::vector<cv::Point> points);
+std::vector<cv::Point2f> getImageCorners(cv::Mat& image);
+cv::Mat getTransformMat(cv::Mat& image, std::vector<cv::Point>& corners);
+void transform(cv::Mat& image, cv::Mat& transMat);
+
+//To be removed?
+//void undistortAndCrop(cv::Mat& image, cv::Mat& cameraMatrix, cv::Mat& distCoeffs, std::vector<cv::Point>& corners);
+
+std::vector<int> chooseCameras();
+
+std::vector<cv::Point2f> findLasers(cv::Mat& images);
+
+cv::Mat getImage(Camera& cam);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void loadCalibration(cv::Mat& cameraMatrix, cv::Mat& distCoeffs, const char* filepath)
+{
+	std::ifstream file;
+	file.open(filepath);
+
+	cameraMatrix = cv::Mat::eye(3, 3, CV_64F);
+	distCoeffs = cv::Mat::zeros(8, 1, CV_64F);
+
+	printf("Loading Camera matrix coefficients from %s\n", filepath);
+	for(int x = 0; x < 3; x++)
+	{
+		for(int y = 0; y < 3; y++)
+		{
+			file >> cameraMatrix.at<double>(x, y);
+			printf("(%d, %d): %f\n", x, y, cameraMatrix.at<double>(x, y));
+		}
+	}
+
+	printf("Loading distortion coefficients from %s\n", filepath);
+	for(int i = 0; i < 8; i++)
+	{
+		file >> distCoeffs.at<double>(i, 0);
+		printf("(%d): %f\n", i, distCoeffs.at<double>(i, 0));
+	}
+
+	file.close();
+}
+
+void loadCalibration(cv::Mat& cameraMatrix, cv::Mat& distCoeffs, int cameraSelection)
+{
+	std::string path = "calibration/cam"+std::to_string(cameraSelection)+".cal";
+	loadCalibration(cameraMatrix, distCoeffs, path.c_str());
+}
 
 float getAngle(float distanceToScreen, float distanceFromOrigin)
 {
 	return atanf(distanceFromOrigin/distanceToScreen); //sqrtf(distanceToScreen*distanceToScreen + distanceFromOrigin*distanceFromOrigin
 }
 
-void drawPoints(cv::Mat* image, const std::vector<cv::Point2f>& points)
+void drawPoints(cv::Mat& image, const std::vector<cv::Point2f>& points)
 {
 	for(unsigned int i = 0; i < points.size(); i++)
 	{
-		cv::circle(*image, points[i], 2, cv::Scalar(0, 0, 255), -1);
+		cv::circle(image, points[i], 2, cv::Scalar(0, 0, 255), -1);
 	}
 }
 
-void transform(cv::Mat* image, const std::vector<cv::Point>& inPoints)
-{
-	std::vector<cv::Point2f> inCorners;
-
-	for(int i = 0; i < 4; i++)
-	{
-		inCorners.push_back(cv::Point2f(inPoints[i].x, inPoints[i].y));
-	}
-
-	/*
-		This is just sorting the points so the transform maintains the correct orientation
-	*/
-
-	for(int i = 1; i < 4; i++)
-	{
-		float tempxy = inCorners[i].x + inCorners[i].y;
-		cv::Point2f temp = inCorners[i];
-
-		int n;
-		for(n = i - 1; n >= 0 && tempxy < (inCorners[n].x+inCorners[n].y); n--)
-		{
-			inCorners[n+1] = inCorners[n];
-		}
-		inCorners[n+1] = temp;
-	}
-
-	if(inCorners[1].x > inCorners[2].x)
-	{
-		cv::Point2f temp = inCorners[2];
-		inCorners.erase(inCorners.begin()+2);
-		inCorners.push_back(temp);
-	}
-	else
-	{
-		cv::Point2f temp = inCorners[1];
-		inCorners.erase(inCorners.begin()+1);
-		inCorners.push_back(temp);
-	}
-
-	std::vector<cv::Point2f> outCorners;
-	outCorners.push_back(cv::Point2f(0, 0));
-	outCorners.push_back(cv::Point2f((*image).cols, 0));
-	outCorners.push_back(cv::Point2f((*image).cols, (*image).rows));
-	outCorners.push_back(cv::Point2f(0, (*image).rows));
-
-	cv::Mat trans = cv::getPerspectiveTransform(inCorners, outCorners);
-
-	cv::warpPerspective(*image, *image, trans, (*image).size());
-}
-
-std::vector<cv::Point> getCorners( cv::Mat& image)
+std::vector<cv::Point> getQuad( cv::Mat& image)
 {
 	std::vector<cv::Point> outCorners;
 	cv::Mat bw;
 
 	cv::cvtColor(image, bw, CV_BGR2GRAY);
 
-	cv::blur(bw, bw, cv::Size(5,5));
+	//cv::blur(bw, bw, cv::Size(5,5));
 
 	//cv::Canny(bw, bw, 166, 500, 5, true);
 	cv::Canny(bw, bw, 100, 300, 5, true);
@@ -118,6 +158,7 @@ std::vector<cv::Point> getCorners( cv::Mat& image)
 		}
 	}
 
+
 	if(quads.size() != 0)
 	{
 		int largestQuad = 0;
@@ -133,39 +174,297 @@ std::vector<cv::Point> getCorners( cv::Mat& image)
 	return outCorners;
 }
 
-/*
-	locates the paper and does a perspective transform
-*/
-bool cropPaper(cv::Mat* image)
+bool epseq(double p1, double p2, double epsilon)
 {
-	std::vector<cv::Point> outCorners;
+	return (p1 > (p2 - epsilon)) && (p1 < (p2 + epsilon));
+}
 
-	outCorners = getCorners(*image);
+std::vector<cv::Point2f> findCorners(Camera& camera, int iterations)
+{
+	cv::Mat image;
+	std::vector<std::vector<cv::Point>> corners;
+	std::vector<double> areas;
+	std::vector<double> modeVal;
+	std::vector<std::vector<int>> indices;
 
-	if(outCorners.size() == 4)
+	for(int i = 0; i < iterations; i++)
 	{
-		transform(image, outCorners);
-		return true;
+		image = getImage(camera);
+
+		std::vector<cv::Point> quad;
+		quad = getQuad(image);
+
+		if(quad.size() != 0)
+		{
+			corners.push_back(quad);
+			areas.push_back(std::fabs(cv::contourArea(quad)));
+		}
+	}
+
+	printf("Corners.size %d   %f\n", corners.size(), areas[0]);
+
+	for(unsigned int i = 0;  i < areas.size(); i++)
+	{
+		printf("%f\n", areas[i]);
+	}
+
+	for(unsigned int x = 0; x < areas.size(); x++)
+	{
+		bool placed = false;
+		unsigned int y = 0;
+		while(y < modeVal.size() && !placed)
+		{
+			double epsilon = modeVal[y] * 0.05;
+
+			if(epseq(areas[x], modeVal[y], epsilon))
+			{
+				indices[y].push_back(x);
+				placed = true;
+			}
+
+		}
+
+		if(!placed)
+		{
+			modeVal.push_back(areas[x]);
+			std::vector<int> index;
+			index.push_back(x);
+			indices.push_back(index);
+		}
+	}
+
+	int mode = 0;
+	for(unsigned int i = 0; i < indices.size(); i++)
+	{
+		if(indices[i].size() > mode)
+		{
+			mode = i;
+		}
+	}
+
+	cv::Point2f emptyPoint(0, 0);
+	std::vector<cv::Point2f> average;
+
+	average.push_back(emptyPoint);
+	average.push_back(emptyPoint);
+	average.push_back(emptyPoint);
+	average.push_back(emptyPoint);
+
+	//printf("a size   %d\n", indices[mode].size());
+
+	for(unsigned int i = 0; i < indices[mode].size(); i++)
+	{
+		std::vector<cv::Point2f> point;
+		point = orientCorners(corners[indices[mode][i]]);
+
+		for( int p = 0; p < 4; p++)
+		{
+			average[p].x += point[p].x;
+			average[p].y += point[p].y ;
+		}
+
+	}
+
+	for(int p = 0; p < 4; p++)
+	{
+		average[p].x /= (float)indices[mode].size();
+		average[p].y /= (float)indices[mode].size();
+	}
+
+	return average;
+}
+
+
+std::vector<cv::Point2f> orientCorners(std::vector<cv::Point2f> inCorners)
+{
+
+	for(int i = 1; i < 4; i++)
+	{
+		float tempxy = inCorners[i].x + inCorners[i].y;
+		cv::Point2f temp = inCorners[i];
+
+		int n;
+		for(n = i - 1; n >= 0 && tempxy < (inCorners[n].x+inCorners[n].y); n--)
+		{
+			inCorners[n+1] = inCorners[n];
+		}
+		inCorners[n+1] = temp;
+	}
+
+	if(inCorners[1].x > inCorners[2].x)
+	{
+		cv::Point2f temp = inCorners[2];
+		inCorners.erase(inCorners.begin()+2);
+		inCorners.push_back(temp);
 	}
 	else
 	{
-		return false;
+		cv::Point2f temp = inCorners[1];
+		inCorners.erase(inCorners.begin()+1);
+		inCorners.push_back(temp);
 	}
+
+	return inCorners;
 }
 
-cv::Point2f findLaser(cv::Mat& image)
+std::vector<cv::Point2f> orientCorners(std::vector<cv::Point> points)
 {
-	cv::Point2f loc(-1, -1);
+	std::vector<cv::Point2f> inCorners;
+
+	for(int i = 0; i < 4; i++)
+	{
+		inCorners.push_back(cv::Point2f(points[i].x, points[i].y));
+	}
+	
+	return orientCorners(inCorners);
+}
+
+std::vector<cv::Point2f> getImageCorners(cv::Mat& image)
+{
+	std::vector<cv::Point2f> outCorners;
+	outCorners.push_back(cv::Point2f(0, 0));
+	outCorners.push_back(cv::Point2f(image.cols, 0));
+	outCorners.push_back(cv::Point2f(image.cols, image.rows));
+	outCorners.push_back(cv::Point2f(0, image.rows));
+
+	return outCorners;
+}
+
+void transform(cv::Mat& image, cv::Mat& transMat)
+{
+	cv::warpPerspective(image, image, transMat, image.size());
+}
+
+cv::Mat getTransformMat(cv::Mat& image, std::vector<cv::Point2f>& corners)
+{
+	std::vector<cv::Point2f> inCorners = orientCorners(corners);
+	std::vector<cv::Point2f> outCorners = getImageCorners(image);
+
+	return getPerspectiveTransform(inCorners, outCorners);
+}
+
+cv::Mat getTransformMat(cv::Mat& image, std::vector<cv::Point>& corners)
+{
+	std::vector<cv::Point2f> inCorners = orientCorners(corners);
+	std::vector<cv::Point2f> outCorners = getImageCorners(image);
+
+	return getPerspectiveTransform(inCorners, outCorners);
+}
+
+
+std::vector<int> chooseCameras()
+{
+	std::vector<cv::VideoCapture> availableCameras;
+	std::vector<int> selected;
+
+	int numCameras = 0;
+	for(;;)
+	{
+		cv::VideoCapture Camera(numCameras);
+
+		if(Camera.get(CV_CAP_PROP_FRAME_WIDTH) == -1)
+		{
+			break;
+		}
+
+		cv::namedWindow("Camera "+std::to_string(numCameras), CV_WINDOW_AUTOSIZE);
+		availableCameras.push_back(Camera);
+
+		numCameras++;
+	}
+
+	if(availableCameras.size() < 2)
+	{
+		printf("Less than 2 cameras\n");
+		return selected;
+	}
+
+	int selection = -1;
+	cv::Mat image;
+
+	while(!(selected.size() == 2))
+	{
+		//Display
+		for(int i = 0; i < numCameras; i++)
+		{
+			availableCameras[i] >> image;
+
+			if(selection != i)
+			{
+				cv::imshow("Camera "+std::to_string(i), image);
+			}
+		}
+
+		//Input
+		char key = cv::waitKey(25);
+
+		if(key >= '0')
+		{
+			int keyVal = atoi(&key);
+			if((atoi(&key) != selection) && ((keyVal < numCameras && keyVal > -1) || !(selection < numCameras && selection > -1)))
+			{
+				selection = keyVal;
+				selected.push_back(selection);
+				cv::destroyWindow("Camera "+std::to_string(keyVal));
+			}
+		}
+
+	}
+
+	cv::destroyAllWindows();
+
+	return selected;
+}
+
+
+cv::Mat getImage(Camera& cam)
+{
+	cv::Mat image;
+	cv::Mat temp;
+
+	cam.cam >> image;
+
+	temp = image.clone();
+
+	cv::undistort(temp, image, cam.cameraMatrix, cam.distCoeffs);
+
+	return image;
+}
+
+void initTransMat(Camera& cam, int iterations)
+{
+	std::vector<cv::Point2f> cor = findCorners(cam, iterations);
+
+	cv::Mat temp = getImage(cam);
+
+	cam.transMat = getTransformMat(temp, cor);
+}
+
+struct Rect
+{
+	int top;
+	int bottom;
+	int left;
+	int right;
+
+	bool contains(int x, int y)
+	{
+		return (left <= x && right >= x) && (top >= y && bottom <= y);
+	}
+};
+
+
+std::vector<cv::Point2f> findLasers(cv::Mat& image)
+{
+	//std::vector<std::vector<cv::Point>> contours;
+	//cv::findContours(bw, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
+
 	cv::Mat bw;
 	cv::cvtColor(image, bw, CV_BGR2GRAY);
 
 	cv::inRange(bw, 220, 255, bw);
 
-	cv::imshow("Original", bw);
-
-	int num = 0;
-	int xs = 0;
-	int ys = 0;
+	std::vector<Rect> searchAreas;
 
 	for(int x = 0; x < bw.rows ; x++)
 	{
@@ -173,130 +472,164 @@ cv::Point2f findLaser(cv::Mat& image)
 		{
 			if(bw.at<unsigned char>(x, y) > 0)
 			{
-				num++;
-				xs += x;
-				ys += y;
+				bool found = false;
+
+				for(int i = 0; i < searchAreas.size(); i++)
+				{
+					if(searchAreas[i].contains(x, y))
+					{
+						found = true;
+						break;
+					}
+				}
+
+				if(!found) //need to make this scale with resolution
+				{
+					Rect rect;
+					rect.left = x - 50;
+					if(rect.left < 0) rect.left = 0;
+
+					rect.right = x + 50;
+					if(rect.right > bw.rows) rect.right = bw.rows;
+
+					rect.top = y + 100;
+					if(rect.top > bw.cols) rect.top = bw.cols;
+
+					rect.bottom = y;
+
+					searchAreas.push_back(rect);
+				}
 			}
 		}
 	}
-	if(num > 0)
+
+	std::vector<cv::Point2f> lasers;
+
+	for(int i = 0; i < searchAreas.size(); i++)
 	{
+		int num = 0;
+		float xs = 0;
+		float ys = 0;
+
+		for(int x = searchAreas[i].left; x < searchAreas[i].right ; x++)
+		{
+			for(int y = searchAreas[i].bottom; y < searchAreas[i].top ; y++)
+			{
+				if(bw.at<unsigned char>(x, y) > 0)
+				{
+					num++;
+					xs += x;
+					ys += y;
+				}
+			}
+		}
+
 		xs /= num;
 		ys /= num;
 
-		loc.x = ys;
-		loc.y = xs;
+		cv::Point2f laser(ys, xs);
+
+		lasers.push_back(laser);
 	}
 
-
-	return loc;
+	return lasers;
 }
+
 
 
 int main()
 {
-	cv::namedWindow("Original", CV_WINDOW_AUTOSIZE);
-	cv::namedWindow("Processed", CV_WINDOW_AUTOSIZE);
 
-	cv::VideoCapture capture(0);
+	//Get Cameras (user) or error
+	std::vector<int> cameraIds = chooseCameras();
 
-	if(!capture.isOpened())
-	{
-		std::cout << "No camera found" << std::endl;
-		return 1;
-	}
-
-	capture.set(CV_CAP_PROP_FRAME_WIDTH, frameWidth);
-	capture.set(CV_CAP_PROP_FRAME_HEIGHT, frameHeight);
+	cv::namedWindow ("Primary", CV_WINDOW_AUTOSIZE);
+	cv::namedWindow ("Secondary", CV_WINDOW_AUTOSIZE);
 
 
-	cv::Mat defaultImage(capture.get(CV_CAP_PROP_FRAME_HEIGHT), capture.get(CV_CAP_PROP_FRAME_WIDTH), CV_8UC3, cv::Scalar(0));
-	cv::putText(defaultImage, "No surface found", cv::Point(50, defaultImage.rows/2), 4, 1.6, cv::Scalar(255, 255, 255), 3, 8); 
+	printf("%d, %d\n", cameraIds[0], cameraIds[1] );
 
-	std::cout << defaultImage.cols << std::endl;
-	std::cout << defaultImage.rows << std::endl;
+	std::ifstream file;
+	file.open("config");
+
+	file >> frameWidth;
+	file >> frameHeight;
+
+	file >> primaryScreenWidth;
+	file >> primaryScreenHeight;
+
+	file >> secondaryScreenWidth;
+	file >> secondaryScreenHeight;
+
+	file >> searchIterations;
+
+	file.close();
+
+	printf("Primary screen dimensons: %fcm, %fcm\n", primaryScreenWidth, primaryScreenHeight);
+	printf("Secondary screen dimensons: %fcm, %fcm\n", secondaryScreenWidth, secondaryScreenHeight);
+
+	Camera primary;
+	primary.cam = cv::VideoCapture(cameraIds[0]);
+	//primary.cam.set(CV_CAP_PROP_FRAME_WIDTH, frameWidth);
+	//primary.cam.set(CV_CAP_PROP_FRAME_HEIGHT, frameHeight);
+
+	Camera secondary;
+	secondary.cam = cv::VideoCapture(cameraIds[1]);
+	//secondary.cam.set(CV_CAP_PROP_FRAME_WIDTH, frameWidth);
+	//secondary.cam.set(CV_CAP_PROP_FRAME_HEIGHT, frameHeight);
+
+
+	loadCalibration(primary.cameraMatrix, primary.distCoeffs, cameraIds[0]);
+	loadCalibration(secondary.cameraMatrix, secondary.distCoeffs, cameraIds[1]);
+
+
+
+	initTransMat(primary, searchIterations);
+	//initTransMat(secondary, searchIterations);
 
 
 	char key = 0;
-	cv::Mat image;
 
-	std::ofstream filex;
-	std::ofstream filey;
-	filex.open("x2.txt");
-	filey.open("y2.txt");
+	cv::Mat image;
 
 	while(key != 'q')
 	{
-		double t = cv::getTickCount();
+		image = getImage(primary);
+		transform(image,  primary.transMat);
 
-		capture >> image;
-		cv::imshow("Original", image);
+		//cv::Mat bw;
+		//cv::cvtColor(image, bw, CV_BGR2GRAY);
 
+		//cv::inRange(bw, 220, 255, bw);
 
-		if(cropPaper(&image))
-		{
-			cv::Point2f laserCoord;
-			laserCoord = findLaser(image);
+		std::vector<cv::Point2f> plasers = findLasers(image);
+		drawPoints(image, plasers);
 
-			cv::circle(image, laserCoord, 5, cv::Scalar(0, 0, 255), -1);
-
-			float cmPerPixelX = paperWidth/image.cols;
-			float cmPerPixelY = paperHeight/image.rows;
-
-			float xPixelPos = laserCoord.x - image.cols/2;
-			float yPixelPos = -(laserCoord.y - image.rows/2);
-
-			float cmX = xPixelPos * cmPerPixelX;
-			float cmY = yPixelPos * cmPerPixelY;
-
-			
-		//	std::string xs("");
-		//	xs+=cmX;
-
-		//	std::string ys("");
-		//	ys+=cmY;
-			
-
-			char xstr[200];
-			char ystr[200];
-
-			sprintf(xstr, "X: %fcm", cmX);
-			sprintf(ystr, "Y: %fcm", cmY);
-
-		//	float d = sqrtf(dist*dist + cmX*cmX);
-		//	float xTheta = getAngle(d, cmX);
-		//	float yTheta = getAngle(d, cmY);
-
-			if(laserCoord.x < 0 )
-			{
-				cv::putText(image, "Laser not found", cv::Point(10, 30), 4, 1.0, cv::Scalar(255, 255, 255), 3, 8); 
-			}
-			else
-			{
-				cv::putText(image, xstr, cv::Point(10, 30), 4, 1.0, cv::Scalar(255, 255, 255), 3, 8); 
-				cv::putText(image, ystr, cv::Point(10, 60), 4, 1.0, cv::Scalar(255, 255, 255), 3, 8); 
-
-				filex << cmX << "\n";
-				filey << cmY << "\n";
-			}
+		cv::imshow("Primary", image);
 
 
-			cv::imshow("Processed", image);
-		}
-		else
-		{
-			cv::imshow("Processed", defaultImage);
-		}
+
+		
+		image = getImage(secondary);
+		transform(image,  secondary.transMat);
 
 
-		t = (cv::getTickCount() - t)/cv::getTickFrequency();
 
-	//	std::cout << 1.0/t << std::endl;
+		cv::imshow("Secondary", image);
+		
+		std::vector<cv::Point2f> slasers = findLasers(image);
+		drawPoints(image, slasers);
+
 		key = cv::waitKey(25);
 	}
-	filey.close();
-	filex.close();
 
-	cv::waitKey(0);
-	return 0;
+
+
+	//Choose primary Camera
+	//load distortion correction
+	//find view rectangle
+
+	//track laser
+		//each frame apply undistort and perspective transform
+
 }

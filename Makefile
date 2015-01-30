@@ -1,7 +1,7 @@
 PROJECTNAME :=angles
 
-CC := g++
-CFLAGS := -std=c++11 -Wall $(ARGS) `pkg-config --cflags opencv`
+CC := g++-4.9
+CFLAGS := -fdiagnostics-color=always -std=c++11 -Wall $(ARGS) `pkg-config --cflags opencv`
 
 CUDAPATH := /usr/local/cuda
 CUDALIBPATH := -L$(CUDAPATH)/lib64

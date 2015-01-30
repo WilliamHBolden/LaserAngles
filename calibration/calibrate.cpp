@@ -187,9 +187,6 @@ void compareResult(cv::Mat& cameraMatrix, cv::Mat& distCoeffs, int cameraSelecti
 
 void saveCalibration(cv::Mat& cameraMatrix, cv::Mat& distCoeffs, int cameraSelection)
 {
-	//	cameraMatrix = cv::Mat::eye(3, 3, CV_64F);
-	//distCoeffs = cv::Mat::zeros(8, 1, CV_64F);
-
 	std::ofstream file;
 	file.open("cam"+std::to_string(cameraSelection)+".cal");
 
@@ -197,7 +194,7 @@ void saveCalibration(cv::Mat& cameraMatrix, cv::Mat& distCoeffs, int cameraSelec
 	{
 		for(int y = 0; y < 3; y++)
 		{
-			file << distCoeffs.at<double>(x, y) << std::endl;
+			file << cameraMatrix.at<double>(x, y) << std::endl;
 		}
 	}
 
@@ -209,16 +206,19 @@ void saveCalibration(cv::Mat& cameraMatrix, cv::Mat& distCoeffs, int cameraSelec
 	file.close();
 }
 
-void loadCalibration(cv::Mat& cameraMatrix, cv::Mat& distCoeffs, const char* filename)
+void loadCalibration(cv::Mat& cameraMatrix, cv::Mat& distCoeffs, const char* filepath)
 {
 	std::ifstream file;
-	file.open(filename);
+	file.open(filepath);
+
+	cameraMatrix = cv::Mat::eye(3, 3, CV_64F);
+	distCoeffs = cv::Mat::zeros(8, 1, CV_64F);
 
 	for(int x = 0; x < 3; x++)
 	{
 		for(int y = 0; y < 3; y++)
 		{
-			file >> distCoeffs.at<double>(x, y);
+			file >> cameraMatrix.at<double>(x, y);
 		}
 	}
 
@@ -227,6 +227,7 @@ void loadCalibration(cv::Mat& cameraMatrix, cv::Mat& distCoeffs, const char* fil
 		file >> distCoeffs.at<double>(i, 0);
 	}
 
+	file.close();
 }
 
 int main()
@@ -242,7 +243,9 @@ int main()
 	saveCalibration(camMat, distCoeffs, selection);
 
 
-	//loadCalibration(camMat, distCoeffs, "cam0.cal");
+
+//	loadCalibration(camMat, distCoeffs, "cam0.cal");
+
 	//saveCalibration(camMat, distCoeffs, 1);
 
 	return 0;
